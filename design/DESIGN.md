@@ -27,6 +27,7 @@ flowchart LR
     Workers --> ERP[Microsoft Business Central]
     Workers --> Channels
 ```
+Please have a look at png file
 
 ### Main Components
 
@@ -192,6 +193,7 @@ Additional worker behavior:
 - ERP retries
 - Audit history
 - Basic operations dashboard
+- Peak handling by introducing a queue (which internally handles high load)
 
 ### Excluded from Version 1
 
@@ -201,5 +203,41 @@ Additional worker behavior:
 - A separate microservice for each integration
 - LLM- or AI-based stock distribution across channels
 - Removal of manual operations support
+
+## 9. Assumptions
+
+- The warehouse system is the authority for physical stock and provides either 
+   stock updates or a way to query the current stock. (External System)
+- Each channel provides a stable external order ID. Where available, stable
+  event IDs or event versions are also used.
+- Business Central supports idempotent order creation or reliable lookup using a
+  stable external reference.
+- The website can read stock updates from this service or receive them through
+  an API.
+- The 60-second stock-synchronization target applies under normal conditions. It
+  does not apply during external outages or polling delays that the service
+  cannot control.
+- Returned goods become available again only after the warehouse confirms that
+  they are suitable for resale.
+- Safety buffers can be configured per SKU or per channel.
+- The service would be deployed on AWS. The API and worker processes can scale
+  independently, while PostgreSQL and SQS provide durable state and background
+  processing.
+
+## 10. Trade-offs
+
+| Decision | Chosen approach | Rejected alternative | Why |
+|---|---|---|---|
+| Application architecture | Modular NestJS monolith with separate API and worker processes | Multiple independently deployed microservices | This keeps operational overhead lower and allows faster delivery. |
+| Inventory authority | PostgreSQL transactions and row-level locks | Redis-only reservations | Durable transactions and database constraints protect the last unit when requests arrive at the same time. |
+| Background processing | Transactional outbox and SQS | In-memory jobs or direct synchronous API calls | This prevents downstream work from being lost and keeps slow integrations from blocking order processing. |
+| Stock synchronization | Per-channel rate limits and latest-quantity coalescing | Synchronous updates to every channel for each order | This respects channel API limits and prevents one failing channel from blocking the others. |
+| ERP delivery | Durable retries with stable external references and reconciliation | Unconditional retry after every timeout | This handles ambiguous outcomes and reduces the chance of creating duplicate ERP orders. |
+
+## 11. AI Usage Note
+
+1. Used OpenAI ChatGPT for deliverables and understanding
+2. Used Mermaid for Architecture drawing
+3. Copilot for formatting my Google doc into .md file
 
 Link to Google-doc: https://docs.google.com/document/d/18V1631F_-DBLddn-vo3CkVCa-W0i4ZzaLibzNT1zJjY/edit?usp=sharing
